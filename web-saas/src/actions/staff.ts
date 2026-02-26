@@ -12,6 +12,25 @@ export interface OrgMember {
   joined_at: string
   created_at?: string
   user_email?: string
+export interface OrgMember {
+  id: string
+  organization_id: string
+  user_id: string | null
+  role: 'owner' | 'admin' | 'manager' | 'member'
+  joined_at: string
+  created_at?: string
+  user_email?: string
+}
+
+export interface BranchMember {
+  id: string
+  branch_id: string
+  user_id: string | null
+  role: 'manager' | 'staff' | 'viewer'
+  joined_at: string
+  created_at?: string
+  user_email?: string
+  branch_name?: string
 }
 
 export interface Invitation {
@@ -317,7 +336,7 @@ export async function resendInvitation(invitationId: string, organizationId: str
 }
 
 // Branch Members
-export async function getBranchMembers(organizationId: string): Promise<any[]> {
+export async function getBranchMembers(organizationId: string): Promise<BranchMember[]>
   const supabase = await createClient()
 
   const { data: branches } = await supabase
@@ -350,6 +369,10 @@ export async function getBranchMembers(organizationId: string): Promise<any[]> {
   }
 
   return data.map(m => ({
+    ...m,
+    user_email: m.user_id ? userEmailMap.get(m.user_id) || 'Unknown' : 'Unknown',
+    branch_name: branchMap.get(m.branch_id) || 'Unknown'
+  return data.map((m): BranchMember => ({
     ...m,
     user_email: m.user_id ? userEmailMap.get(m.user_id) || 'Unknown' : 'Unknown',
     branch_name: branchMap.get(m.branch_id) || 'Unknown'
