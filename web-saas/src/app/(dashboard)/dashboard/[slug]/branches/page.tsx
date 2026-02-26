@@ -13,15 +13,6 @@ interface Branch {
   name: string
   code: string
   address: string | null
-  is_active: boolean
-  created_at: string
-  updated_at: string
-interface Branch {
-  id: string
-  organization_id: string
-  name: string
-  code: string
-  address: string | null
   latitude: number | null
   longitude: number | null
   geohash: string | null
@@ -46,13 +37,13 @@ export default function BranchesPage() {
   useEffect(() => {
     async function fetchData() {
       if (!slug) return
-      
+
       try {
         // Get organization by slug
         const org = await getOrganizationBySlug(slug)
         if (org) {
           setOrganization(org)
-          
+
           // Get branches for this organization
           const branchesData = await getBranchesByOrganization(org.id)
           setBranches(branchesData)
@@ -103,7 +94,7 @@ export default function BranchesPage() {
       </div>
 
       {/* Branch List */}
-      <BranchList 
+      <BranchList
         branches={branches}
         organizationId={organization.id}
         organizationSlug={slug}
