@@ -16,6 +16,18 @@ interface Branch {
   is_active: boolean
   created_at: string
   updated_at: string
+interface Branch {
+  id: string
+  organization_id: string
+  name: string
+  code: string
+  address: string | null
+  latitude: number | null
+  longitude: number | null
+  geohash: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
 }
 
 interface Organization {
