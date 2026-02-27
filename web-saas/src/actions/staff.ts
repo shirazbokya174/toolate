@@ -271,7 +271,8 @@ export async function updateOrganizationMemberRole(
   return { success: true }
 }
 
-// Resend invitation email
+
+// Resend invitation email - simple delete and recreate
 export async function resendInvitation(invitationId: string, organizationId: string) {
   const supabase = await createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -291,68 +292,36 @@ export async function resendInvitation(invitationId: string, organizationId: str
     return { error: 'Invitation not found' }
   }
 
-  // Check if user already exists in auth.users
-  const supabaseAdmin = createAdminClient()
-  const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
+  // Delete old invitation
+  const { error: deleteError } = await supabase
+    .from('invitations')
+    .delete()
+    .eq('id', invitationId)
 
-  // Check if user already exists in auth
-  const { data: existingAuthUser, error: userCheckError } = await supabaseAdmin.from('auth.users').select('id, email').ilike('email', invitation.email).single()
-
-
-  if (existingAuthUser) {
-    // User already exists - check if already a member
-    const { data: existingMember } = await supabase
-      .from('organization_members')
-      .select('id')
-      .eq('organization_id', organizationId)
-      .eq('user_id', existingAuthUser.id)
-      .single()
-
-    if (existingMember) {
-      return { error: 'User is already a member of this organization' }
-    }
-
-    // Add existing user directly to organization
-    const { error: insertError } = await supabase
-      .from('organization_members')
-      .insert({
-        organization_id: organizationId,
-        user_id: existingAuthUser.id,
-        role: invitation.role,
-        invited_by: user.id,
-      })
-
-    if (insertError) {
-      return { error: insertError.message }
-    }
-
-    console.log('[STAFF] Added existing user to organization:', invitation.email)
-  } else {
-    // User doesn't exist - send invitation
-    const { error: inviteApiError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
-      invitation.email,
-      {
-        redirectTo: `${appUrl}/login`,
-        data: {
-          organization_id: organizationId,
-          role: invitation.role,
-          invited_by: user.id
-        }
-      }
-    )
-
-    if (inviteApiError) {
-      console.error('[STAFF] Resend Invite API error:', inviteApiError)
-      return { error: inviteApiError.message }
-    }
-
-    console.log('[STAFF] Resent invitation to:', invitation.email)
+  if (deleteError) {
+    return { error: 'Failed to remove old invitation' }
   }
 
-  revalidatePath('/dashboard')
-  return { success: true }
-}
+  // Create new invitation
+  const { error: insertError } = await supabase
+    .from('invitations')
+    .insert({
+      organization_id: organizationId,
+      email: invitation.email,
+      role: invitation.role,
+      status: 'pending',
+      invited_by: user.id,
+    })
 
+  if (insertError) {
+    return { error: 'Failed to create new invitation' }
+  }
+
+  console.log('[STAFF] Resent invitation (recreated) to:', invitation.email)
+
+  revalidatePath('/dashboard')
+  return { success: true, message: 'Invitation resent successfully' }
+}
 // Branch Members
 export async function getBranchMembers(organizationId: string): Promise<BranchMember[]> {
   const supabase = await createClient()
