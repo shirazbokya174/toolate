@@ -1,8 +1,8 @@
 'use server'
 
 import { createClient } from '@/utils/supabase/server'
+import { createAdminClient } from '@/utils/supabase/admin'
 import { revalidatePath } from 'next/cache'
-import { sendInvitationEmail } from '@/lib/email'
 
 export interface OrgMember {
   id: string
@@ -185,34 +185,26 @@ export async function inviteOrganizationMember(formData: FormData) {
     return { error: inviteError.message }
   }
 
-  // Get organization details for email
-  const { data: organization } = await supabase
-    .from('organizations')
-    .select('name')
-    .eq('id', organizationId)
-    .single()
-
-  // Get inviter name from user_profiles
-  const { data: inviterProfile } = await supabase
-    .from('user_profiles')
-    .select('full_name, email')
-    .eq('id', user.id)
-    .single()
-
-  const inviterName = inviterProfile?.full_name || inviterProfile?.email || 'A team member'
-  const orgName = organization?.name || 'the organization'
-
-  // Send invitation email
+  // Send invitation via Supabase Admin API (sends email automatically)
+  const supabaseAdmin = createAdminClient()
   const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
-  const inviteUrl = `${appUrl}/login?invite=${encodeURIComponent(email)}`
 
-  await sendInvitationEmail({
-    to: email,
-    inviterName,
-    organizationName: orgName,
-    role,
-    inviteUrl,
-  })
+  const { data: inviteData, error: inviteApiError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+    email,
+    {
+      redirectTo: `${appUrl}/login`,
+      data: {
+        organization_id: organizationId,
+        role: role,
+        invited_by: user.id
+      }
+    }
+  )
+
+  if (inviteApiError) {
+    console.error('[STAFF] Invite API error:', inviteApiError)
+    return { error: inviteApiError.message }
+  }
 
   console.log('[STAFF] SUCCESS - Invitation sent to:', email)
 
@@ -293,36 +285,29 @@ export async function resendInvitation(invitationId: string, organizationId: str
     return { error: 'Invitation not found' }
   }
 
-  // Get organization details
-  const { data: organization } = await supabase
-    .from('organizations')
-    .select('name')
-    .eq('id', organizationId)
-    .single()
-
-  // Get inviter details
-  const { data: inviterProfile } = await supabase
-    .from('user_profiles')
-    .select('full_name, email')
-    .eq('id', user.id)
-    .single()
-
-  const inviterName = inviterProfile?.full_name || inviterProfile?.email || 'A team member'
-  const orgName = organization?.name || 'the organization'
-
-  // Send invitation email
+  // Resend invitation via Supabase Admin API
+  const supabaseAdmin = createAdminClient()
   const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
-  const inviteUrl = `${appUrl}/login?invite=${encodeURIComponent(invitation.email)}`
 
-  await sendInvitationEmail({
-    to: invitation.email,
-    inviterName,
-    organizationName: orgName,
-    role: invitation.role,
-    inviteUrl,
-  })
+  const { error: inviteApiError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+    invitation.email,
+    {
+      redirectTo: `${appUrl}/login`,
+      data: {
+        organization_id: organizationId,
+        role: invitation.role,
+        invited_by: user.id
+      }
+    }
+  )
+
+  if (inviteApiError) {
+    console.error('[STAFF] Resend Invite API error:', inviteApiError)
+    return { error: inviteApiError.message }
+  }
 
   console.log('[STAFF] Resent invitation to:', invitation.email)
+
   revalidatePath('/dashboard')
   return { success: true }
 }
