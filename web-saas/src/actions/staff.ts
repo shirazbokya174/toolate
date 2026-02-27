@@ -146,14 +146,8 @@ export async function inviteOrganizationMember(formData: FormData) {
   const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
 
   // Try to find existing user in auth by listing users and filtering
-  const { data: usersList, error: listError } = await supabaseAdmin.auth.admin.listUsers()
+  const { data: existingAuthUser, error: userCheckError } = await supabaseAdmin.from('auth.users').select('id, email').eq('email', email.toLowerCase()).single()
   
-  if (listError) {
-    console.error('[STAFF] List users error:', listError)
-    return { error: 'Failed to check existing users' }
-  }
-
-  const existingAuthUser = usersList?.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
   if (existingAuthUser) {
     // User exists in auth - add directly to organization
     console.log('[STAFF] Existing auth user found:', existingAuthUser.id)
@@ -302,14 +296,8 @@ export async function resendInvitation(invitationId: string, organizationId: str
   const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
 
   // Check if user already exists in auth
-  const { data: usersList, error: listError } = await supabaseAdmin.auth.admin.listUsers()
+  const { data: existingAuthUser, error: userCheckError } = await supabaseAdmin.from('auth.users').select('id, email').eq('email', invitation.email.toLowerCase()).single()
 
-  if (listError) {
-    console.error('[STAFF] List users error:', listError)
-    return { error: 'Failed to check existing users' }
-  }
-
-  const existingAuthUser = usersList?.users.find(u => u.email?.toLowerCase() === invitation.email.toLowerCase())
 
   if (existingAuthUser) {
     // User already exists - check if already a member
