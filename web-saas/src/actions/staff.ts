@@ -141,22 +141,28 @@ export async function inviteOrganizationMember(formData: FormData) {
     return { error: 'Invitation already sent' }
   }
 
-  // Check if user exists in auth.users using admin API
+  // Check if user exists in auth.users using admin API - list users with filter
   const supabaseAdmin = createAdminClient()
   const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
 
-  // Try to find existing user in auth
-  const { data: existingAuthUser } = await supabaseAdmin.auth.admin.getUserByEmail(email)
+  // Try to find existing user in auth by listing users and filtering
+  const { data: usersList, error: listError } = await supabaseAdmin.auth.admin.listUsers()
+  
+  if (listError) {
+    console.error('[STAFF] List users error:', listError)
+    return { error: 'Failed to check existing users' }
+  }
 
+  const existingAuthUser = usersList?.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
   if (existingAuthUser) {
     // User exists in auth - add directly to organization
-    console.log('[STAFF] Existing auth user found:', existingAuthUser.user.id)
+    console.log('[STAFF] Existing auth user found:', existingAuthUser.id)
     
     const { error: insertError } = await supabase
       .from('organization_members')
       .insert({
         organization_id: organizationId,
-        user_id: existingAuthUser.user.id,
+        user_id: existingAuthUser.id,
         role,
         invited_by: user.id,
       })
@@ -167,39 +173,55 @@ export async function inviteOrganizationMember(formData: FormData) {
 
     revalidatePath('/dashboard')
     return { success: true }
-  }
+  } else {
+    // User doesn't exist in auth - create them with temporary password
+    // This sends an email for them to set their password
+    const tempPassword = Math.random().toString(36).slice(-12) + 'A1!'
+    
 
-  // User doesn't exist - create them with temporary password
-  // This sends an email for them to set their password
-  const tempPassword = Math.random().toString(36).slice(-12) + 'A1!'
-  
-  const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
-    email,
-    password: tempPassword,
-    email_confirm: false, // User must set their own password
-    user_metadata: {
-      organization_id: organizationId,
-      role: role,
-      invited_by: user.id
-    },
-    data: {
-      organization_id: organizationId,
-      role: role,
-      invited_by: user.id
+    const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password: tempPassword,
+      email_confirm: false, // User must set their own password
+      user_metadata: {
+        organization_id: organizationId,
+        role: role,
+        invited_by: user.id
+      }
+    })
+
+    if (createUserError) {
+      console.error('[STAFF] Create user error:', createUserError)
+      return { error: createUserError.message }
     }
-  })
 
-  if (createUserError) {
-    console.error('[STAFF] Create user error:', createUserError)
-    return { error: createUserError.message }
+    if (!newUser?.user) {
+      return { error: 'Failed to create user' }
+    }
+
+    console.log('[STAFF] New user created:', newUser.user.id)
+    
+    // Add invitation record to invitations table
+    const { error: inviteError } = await supabase
+      .from('invitations')
+      .insert({
+        organization_id: organizationId,
+        email: email,
+        role: role,
+        status: 'pending',
+        invited_by: user.id
+      })
+
+    if (inviteError) {
+      console.error('[STAFF] Create invitation error:', inviteError)
+      return { error: inviteError.message }
+    }
+
+    console.log('[STAFF] SUCCESS - User invited:', email, 'User ID:', newUser.user.id)
+
+    revalidatePath('/dashboard')
+    return { success: true, invitationSent: true }
   }
-
-  console.log('[STAFF] New user created:', newUser.user.id)
-  
-  console.log('[STAFF] SUCCESS - User invited:', email, 'User ID:', newUser.user.id)
-
-  revalidatePath('/dashboard')
-  return { success: true, invitationSent: true }
 }
 
 export async function removeOrganizationMember(memberId: string, organizationId: string) {
