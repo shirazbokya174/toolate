@@ -141,27 +141,25 @@ export async function inviteOrganizationMember(formData: FormData) {
     return { error: 'Invitation already sent' }
   }
 
-  // Check if user exists
-  const { data: existingUser } = await supabase
-    .from('user_profiles')
-    .select('id')
-    .eq('email', email)
-    .single()
+  // Check if user exists in auth.users using admin API
+  const supabaseAdmin = createAdminClient()
+  const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
 
-  console.log('[STAFF] Existing user:', existingUser)
+  // Try to find existing user in auth
+  const { data: existingAuthUser } = await supabaseAdmin.auth.admin.getUserByEmail(email)
 
-  if (existingUser) {
-    // Add directly
+  if (existingAuthUser) {
+    // User exists in auth - add directly to organization
+    console.log('[STAFF] Existing auth user found:', existingAuthUser.user.id)
+    
     const { error: insertError } = await supabase
       .from('organization_members')
       .insert({
         organization_id: organizationId,
-        user_id: existingUser.id,
+        user_id: existingAuthUser.user.id,
         role,
         invited_by: user.id,
       })
-
-    console.log('[STAFF] Direct add:', insertError)
 
     if (insertError) {
       return { error: insertError.message }
@@ -171,42 +169,34 @@ export async function inviteOrganizationMember(formData: FormData) {
     return { success: true }
   }
 
-  // Create pending invitation
-  const { error: inviteError } = await supabase
-    .from('invitations')
-    .insert({
-      organization_id: organizationId,
-      email,
-      role,
-      invited_by: user.id,
-    })
-
-  if (inviteError) {
-    return { error: inviteError.message }
-  }
-
-  // Send invitation via Supabase Admin API (sends email automatically)
-  const supabaseAdmin = createAdminClient()
-  const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
-
-  const { data: inviteData, error: inviteApiError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+  // User doesn't exist - create them with temporary password
+  // This sends an email for them to set their password
+  const tempPassword = Math.random().toString(36).slice(-12) + 'A1!'
+  
+  const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
     email,
-    {
-      redirectTo: `${appUrl}/login`,
-      data: {
-        organization_id: organizationId,
-        role: role,
-        invited_by: user.id
-      }
+    password: tempPassword,
+    email_confirm: false, // User must set their own password
+    user_metadata: {
+      organization_id: organizationId,
+      role: role,
+      invited_by: user.id
+    },
+    data: {
+      organization_id: organizationId,
+      role: role,
+      invited_by: user.id
     }
-  )
+  })
 
-  if (inviteApiError) {
-    console.error('[STAFF] Invite API error:', inviteApiError)
-    return { error: inviteApiError.message }
+  if (createUserError) {
+    console.error('[STAFF] Create user error:', createUserError)
+    return { error: createUserError.message }
   }
 
-  console.log('[STAFF] SUCCESS - Invitation sent to:', email)
+  console.log('[STAFF] New user created:', newUser.user.id)
+  
+  console.log('[STAFF] SUCCESS - User invited:', email, 'User ID:', newUser.user.id)
 
   revalidatePath('/dashboard')
   return { success: true, invitationSent: true }
