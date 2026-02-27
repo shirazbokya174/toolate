@@ -188,15 +188,10 @@ export async function inviteOrganizationMember(formData: FormData) {
       return { error: inviteError.message }
     }
 
-    // Now that the invitation exists, create the user.
-    // This sends an email for them to set their password
-    const tempPassword = Math.random().toString(36).slice(-12) + 'A1!'
-
-    const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password: tempPassword,
-      email_confirm: false, // User must set their own password
-      user_metadata: {
+    // Now that the invitation exists, invite the user via Supabase Admin API.
+    // This natively sends the Supabase 'Invite User' email template.
+    const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      data: {
         organization_id: organizationId,
         role: role,
         invited_by: user.id
@@ -300,13 +295,9 @@ export async function resendInvitation(invitationId: string, organizationId: str
     return { error: 'Invitation not found' }
   }
 
-  // Try to create user and send confirmation email
-  const tempPassword = Math.random().toString(36).slice(-12) + 'A1!'
-  const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
-    email: invitation.email,
-    password: tempPassword,
-    email_confirm: false,
-    user_metadata: {
+  // Try to invite user and send confirmation email natively
+  const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.inviteUserByEmail(invitation.email, {
+    data: {
       organization_id: organizationId,
       role: invitation.role,
       invited_by: user.id
@@ -314,11 +305,11 @@ export async function resendInvitation(invitationId: string, organizationId: str
   })
 
   if (createUserError) {
-    console.log('[STAFF] Create user error (may be existing):', createUserError.message)
+    console.log('[STAFF] Invite user error (may be existing):', createUserError.message)
 
-    // The user already exists in auth.users, so we should actually resend the signup email
+    // The user already exists in auth.users, so we should actually resend the invite email
     const { error: resendError } = await supabaseAdmin.auth.resend({
-      type: 'signup',
+      type: 'invite',
       email: invitation.email,
     })
 
