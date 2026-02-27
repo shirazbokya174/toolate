@@ -300,7 +300,7 @@ export async function resendInvitation(invitationId: string, organizationId: str
 
   let generatedInviteLink = ''
 
-  const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+  let { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
     type: 'invite',
     email: invitation.email,
     options: {
@@ -311,6 +311,29 @@ export async function resendInvitation(invitationId: string, organizationId: str
       }
     }
   })
+
+  // If Supabase complains that the user is "already registered" (422 error),
+  // they block the 'invite' link generation. We must smoothly fallback to 
+  // generating a "signup" magic link for that existing identity.
+  if (linkError && linkError.message.includes('already been registered')) {
+    console.log('[STAFF] inviteLink blocked by 422 constraint. Falling back to signupLink.')
+
+    const fallbackResponse = await supabaseAdmin.auth.admin.generateLink({
+      type: 'signup',
+      email: invitation.email,
+      password: crypto.randomUUID(), // signup links require a dummy password to establish the identiy cryptographically
+      options: {
+        data: {
+          organization_id: organizationId,
+          role: invitation.role,
+          invited_by: user.id
+        }
+      }
+    })
+
+    linkData = fallbackResponse.data
+    linkError = fallbackResponse.error
+  }
 
   if (linkError) {
     console.error('[STAFF] Failed to generate magic link:', linkError.message)
