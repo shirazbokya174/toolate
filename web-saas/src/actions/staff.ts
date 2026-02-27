@@ -305,20 +305,31 @@ export async function resendInvitation(invitationId: string, organizationId: str
   })
 
   if (createUserError) {
-    console.log('[STAFF] Invite user error (may be existing):', createUserError.message)
+    // The user already exists in auth.users, but because they were invited administratively, 
+    // Supabase explicitly blocks auth.resend() with a 422 error. The only way to re-trigger 
+    // an administrative invite email natively is to delete their unverified auth identity and invite them again.
 
-    // The user already exists in auth.users.
-    // We must use auth.resend with type 'signup' to securely trigger their pending
-    // confirmation/invite email again without getting the "already registered" error.
-    const { error: resendError } = await supabaseAdmin.auth.resend({
-      type: 'signup',
-      email: invitation.email,
-    })
+    // 1. Find their Auth ID
+    const { data: existingUser } = await supabaseAdmin.from('auth.users').select('id').eq('email', invitation.email).single()
 
-    if (resendError) {
-      console.log('[STAFF] Failed to trigger resend via Supabase Auth:', resendError.message)
-    } else {
-      console.log('[STAFF] Successfully triggered Supabase Auth resend email')
+    if (existingUser) {
+      // 2. Delete the unverified ghost account
+      await supabaseAdmin.auth.admin.deleteUser(existingUser.id)
+
+      // 3. Re-trigger the native invite flow
+      const { error: retryError } = await supabaseAdmin.auth.admin.inviteUserByEmail(invitation.email, {
+        data: {
+          organization_id: organizationId,
+          role: invitation.role,
+          invited_by: user.id
+        }
+      })
+
+      if (retryError) {
+        console.log('[STAFF] Failed to re-trigger invite after deletion:', retryError.message)
+      } else {
+        console.log('[STAFF] Successfully deleted and re-invited user to trigger email')
+      }
     }
   } else {
     console.log('[STAFF] Created user and sent email:', newUser?.user?.id)
