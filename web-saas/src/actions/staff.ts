@@ -297,28 +297,69 @@ export async function resendInvitation(invitationId: string, organizationId: str
     return { error: 'Invitation not found' }
   }
 
-  // Resend invitation via Supabase Admin API
+  // Check if user already exists in auth.users
   const supabaseAdmin = createAdminClient()
   const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
 
-  const { error: inviteApiError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
-    invitation.email,
-    {
-      redirectTo: `${appUrl}/login`,
-      data: {
-        organization_id: organizationId,
-        role: invitation.role,
-        invited_by: user.id
-      }
-    }
-  )
+  // Check if user already exists in auth
+  const { data: usersList, error: listError } = await supabaseAdmin.auth.admin.listUsers()
 
-  if (inviteApiError) {
-    console.error('[STAFF] Resend Invite API error:', inviteApiError)
-    return { error: inviteApiError.message }
+  if (listError) {
+    console.error('[STAFF] List users error:', listError)
+    return { error: 'Failed to check existing users' }
   }
 
-  console.log('[STAFF] Resent invitation to:', invitation.email)
+  const existingAuthUser = usersList?.users.find(u => u.email?.toLowerCase() === invitation.email.toLowerCase())
+
+  if (existingAuthUser) {
+    // User already exists - check if already a member
+    const { data: existingMember } = await supabase
+      .from('organization_members')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('user_id', existingAuthUser.id)
+      .single()
+
+    if (existingMember) {
+      return { error: 'User is already a member of this organization' }
+    }
+
+    // Add existing user directly to organization
+    const { error: insertError } = await supabase
+      .from('organization_members')
+      .insert({
+        organization_id: organizationId,
+        user_id: existingAuthUser.id,
+        role: invitation.role,
+        invited_by: user.id,
+      })
+
+    if (insertError) {
+      return { error: insertError.message }
+    }
+
+    console.log('[STAFF] Added existing user to organization:', invitation.email)
+  } else {
+    // User doesn't exist - send invitation
+    const { error: inviteApiError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+      invitation.email,
+      {
+        redirectTo: `${appUrl}/login`,
+        data: {
+          organization_id: organizationId,
+          role: invitation.role,
+          invited_by: user.id
+        }
+      }
+    )
+
+    if (inviteApiError) {
+      console.error('[STAFF] Resend Invite API error:', inviteApiError)
+      return { error: inviteApiError.message }
+    }
+
+    console.log('[STAFF] Resent invitation to:', invitation.email)
+  }
 
   revalidatePath('/dashboard')
   return { success: true }
