@@ -273,11 +273,10 @@ export async function updateOrganizationMemberRole(
 }
 
 
-// Resend invitation email - simple delete and recreate
+// Resend invitation - generates a manual magic link to bypass free-tier email restrictions
 export async function resendInvitation(invitationId: string, organizationId: string) {
   const supabase = await createClient()
   const supabaseAdmin = createAdminClient()
-  const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'https://toolate.vercel.app'
   const { data: { user }, error: authError } = await supabase.auth.getUser()
 
   if (authError || !user) {
@@ -295,44 +294,32 @@ export async function resendInvitation(invitationId: string, organizationId: str
     return { error: 'Invitation not found' }
   }
 
-  // Try to invite user and send confirmation email natively
-  const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.inviteUserByEmail(invitation.email, {
-    data: {
-      organization_id: organizationId,
-      role: invitation.role,
-      invited_by: user.id
+  // Since custom domains are blocked on Vercel free tier, native emails (inviteUserByEmail) 
+  // will fail on resend due to 422 constraints, and soft-deletions are too slow.
+  // The ultimate foolproof solution is generating the magic link directly.
+
+  let generatedInviteLink = ''
+
+  const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+    type: 'invite',
+    email: invitation.email,
+    options: {
+      data: {
+        organization_id: organizationId,
+        role: invitation.role,
+        invited_by: user.id
+      }
     }
   })
 
-  if (createUserError) {
-    // The user already exists in auth.users, but because they were invited administratively, 
-    // Supabase explicitly blocks auth.resend() with a 422 error. The only way to re-trigger 
-    // an administrative invite email natively is to delete their unverified auth identity and invite them again.
+  if (linkError) {
+    console.error('[STAFF] Failed to generate magic link:', linkError.message)
+    return { error: 'Failed to generate invitation link: ' + linkError.message }
+  }
 
-    // 1. Find their Auth ID
-    const { data: existingUser } = await supabaseAdmin.from('auth.users').select('id').eq('email', invitation.email).single()
-
-    if (existingUser) {
-      // 2. Delete the unverified ghost account
-      await supabaseAdmin.auth.admin.deleteUser(existingUser.id)
-
-      // 3. Re-trigger the native invite flow
-      const { error: retryError } = await supabaseAdmin.auth.admin.inviteUserByEmail(invitation.email, {
-        data: {
-          organization_id: organizationId,
-          role: invitation.role,
-          invited_by: user.id
-        }
-      })
-
-      if (retryError) {
-        console.log('[STAFF] Failed to re-trigger invite after deletion:', retryError.message)
-      } else {
-        console.log('[STAFF] Successfully deleted and re-invited user to trigger email')
-      }
-    }
-  } else {
-    console.log('[STAFF] Created user and sent email:', newUser?.user?.id)
+  if (linkData?.properties?.action_link) {
+    generatedInviteLink = linkData.properties.action_link
+    console.log('[STAFF] Successfully generated magic link for:', invitation.email)
   }
 
   // Delete old invitation
@@ -345,7 +332,7 @@ export async function resendInvitation(invitationId: string, organizationId: str
     return { error: 'Failed to remove old invitation' }
   }
 
-  // Create new invitation
+  // Create new pending invitation row
   const { error: insertError } = await supabase
     .from('invitations')
     .insert({
@@ -357,13 +344,16 @@ export async function resendInvitation(invitationId: string, organizationId: str
     })
 
   if (insertError) {
-    return { error: 'Failed to create new invitation' }
+    return { error: 'Failed to create new invitation record' }
   }
 
-  console.log('[STAFF] Resent invitation (recreated) to:', invitation.email)
-
   revalidatePath('/dashboard')
-  return { success: true, message: 'Invitation resent successfully' }
+
+  return {
+    success: true,
+    message: 'Invitation generated successfully',
+    inviteUrl: generatedInviteLink
+  }
 }
 // Branch Members
 export async function getBranchMembers(organizationId: string): Promise<BranchMember[]> {

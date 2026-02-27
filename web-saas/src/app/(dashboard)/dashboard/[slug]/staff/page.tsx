@@ -68,34 +68,38 @@ export default function StaffPage() {
   const [branchMembers, setBranchMembers] = useState<BranchMember[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'org' | 'branch'>('org')
-  
+
   // Dialogs
   const [isInviteOrgOpen, setIsInviteOrgOpen] = useState(false)
   const [isInviteBranchOpen, setIsInviteBranchOpen] = useState(false)
-  
+  const [isInviteUrlOpen, setIsInviteUrlOpen] = useState(false)
+
   // Form state
   const [orgForm, setOrgForm] = useState({ email: '', role: 'member' })
   const [branchForm, setBranchForm] = useState({ branchId: '', email: '', role: 'staff' })
-  
+
+  // Magic link state
+  const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null)
+
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
     async function fetchData() {
       if (!slug) return
-      
+
       try {
         const org = await getOrganizationBySlug(slug)
         if (org) {
           setOrganization(org)
-          
+
           const [members, branchesData] = await Promise.all([
             getOrganizationMembers(org.id),
             getBranchesByOrganization(org.id),
           ])
-          
+
           setOrgMembers(members)
           setBranches(branchesData)
-          
+
           // Also fetch branch members
           const bMembers = await getBranchMembers(org.id)
           setBranchMembers(bMembers)
@@ -113,24 +117,24 @@ export default function StaffPage() {
   const handleInviteOrg = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!organization) return
-    
+
     setIsSubmitting(true)
     const formData = new FormData()
     formData.append('organizationId', organization.id)
     formData.append('email', orgForm.email)
     formData.append('role', orgForm.role)
-    
+
     const result = await inviteOrganizationMember(formData)
     setIsSubmitting(false)
-    
+
     if (result.error) {
       alert(result.error)
       return
     }
-    
+
     setIsInviteOrgOpen(false)
     setOrgForm({ email: '', role: 'member' })
-    
+
     // Refresh
     const members = await getOrganizationMembers(organization.id)
     setOrgMembers(members)
@@ -138,24 +142,24 @@ export default function StaffPage() {
 
   const handleInviteBranch = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     setIsSubmitting(true)
     const formData = new FormData()
     formData.append('branchId', branchForm.branchId)
     formData.append('email', branchForm.email)
     formData.append('role', branchForm.role)
-    
+
     const result = await addBranchMember(formData)
     setIsSubmitting(false)
-    
+
     if (result.error) {
       alert(result.error)
       return
     }
-    
+
     setIsInviteBranchOpen(false)
     setBranchForm({ branchId: '', email: '', role: 'staff' })
-    
+
     // Refresh
     if (organization) {
       const members = await getBranchMembers(organization.id)
@@ -165,14 +169,14 @@ export default function StaffPage() {
 
   const handleUpdateOrgRole = async (memberId: string, newRole: string) => {
     if (!organization) return
-    
+
     const result = await updateOrganizationMemberRole(memberId, newRole as any, organization.id)
-    
+
     if (result.error) {
       alert(result.error)
       return
     }
-    
+
     // Refresh
     const members = await getOrganizationMembers(organization.id)
     setOrgMembers(members)
@@ -181,14 +185,14 @@ export default function StaffPage() {
   const handleRemoveOrgMember = async (memberId: string) => {
     if (!organization) return
     if (!confirm('Are you sure you want to remove this member?')) return
-    
+
     const result = await removeOrganizationMember(memberId, organization.id)
-    
+
     if (result.error) {
       alert(result.error)
       return
     }
-    
+
     // Refresh
     const members = await getOrganizationMembers(organization.id)
     setOrgMembers(members)
@@ -196,16 +200,23 @@ export default function StaffPage() {
 
   const handleResendInvite = async (invitationId: string) => {
     if (!organization) return
-    
+    setIsSubmitting(true)
+
     const result = await resendInvitation(invitationId, organization.id)
-    
+    setIsSubmitting(false)
+
     if (result.error) {
       alert(result.error)
       return
     }
-    
-    alert('Invitation resent successfully!')
-    
+
+    if (result.inviteUrl) {
+      setGeneratedInviteUrl(result.inviteUrl)
+      setIsInviteUrlOpen(true)
+    } else {
+      alert('Invitation resent successfully!')
+    }
+
     // Refresh
     const members = await getOrganizationMembers(organization.id)
     setOrgMembers(members)
@@ -213,14 +224,14 @@ export default function StaffPage() {
 
   const handleRemoveBranchMember = async (memberId: string, branchId: string) => {
     if (!confirm('Are you sure you want to remove this member?')) return
-    
+
     const result = await removeBranchMember(memberId, branchId)
-    
+
     if (result.error) {
       alert(result.error)
       return
     }
-    
+
     // Refresh
     if (organization) {
       const members = await getBranchMembers(organization.id)
@@ -267,25 +278,59 @@ export default function StaffPage() {
         </div>
       </div>
 
+      {/* Magic Link Copy Dialog */}
+      <Dialog open={isInviteUrlOpen} onOpenChange={setIsInviteUrlOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invitation Link Generated</DialogTitle>
+            <DialogDescription>
+              Because custom email domains are restricted on free tiers, we have generated a secure magic link manually.
+              Copy this link and send it directly to your team member!
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex space-x-2 mt-4">
+            <Input
+              readOnly
+              value={generatedInviteUrl || ''}
+              className="flex-1 bg-gray-50 text-gray-500 text-sm"
+            />
+            <Button
+              onClick={() => {
+                if (generatedInviteUrl) {
+                  navigator.clipboard.writeText(generatedInviteUrl)
+                  alert('Copied to clipboard!')
+                }
+              }}
+              className="shrink-0"
+            >
+              Copy Link
+            </Button>
+          </div>
+          <div className="flex justify-end pt-4">
+            <Button variant="outline" onClick={() => setIsInviteUrlOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Tabs */}
       <div className="flex gap-4 mb-6 border-b border-gray-200 dark:border-zinc-800">
         <button
           onClick={() => setActiveTab('org')}
-          className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
-            activeTab === 'org'
-              ? 'border-gray-900 text-gray-900 dark:text-white'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
+          className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${activeTab === 'org'
+            ? 'border-gray-900 text-gray-900 dark:text-white'
+            : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
         >
           Organization Members ({orgMembers.length})
         </button>
         <button
           onClick={() => setActiveTab('branch')}
-          className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
-            activeTab === 'branch'
-              ? 'border-gray-900 text-gray-900 dark:text-white'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
+          className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${activeTab === 'branch'
+            ? 'border-gray-900 text-gray-900 dark:text-white'
+            : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
         >
           Branch Members ({branchMembers.length})
         </button>
