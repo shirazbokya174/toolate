@@ -147,11 +147,11 @@ export async function inviteOrganizationMember(formData: FormData) {
 
   // Try to find existing user in auth by listing users and filtering
   const { data: existingAuthUser, error: userCheckError } = await supabaseAdmin.from('auth.users').select('id, email').ilike('email', email).single()
-  
+
   if (existingAuthUser) {
     // User exists in auth - add directly to organization
     console.log('[STAFF] Existing auth user found:', existingAuthUser.id)
-    
+
     const { error: insertError } = await supabase
       .from('organization_members')
       .insert({
@@ -171,7 +171,7 @@ export async function inviteOrganizationMember(formData: FormData) {
     // User doesn't exist in auth - create them with temporary password
     // This sends an email for them to set their password
     const tempPassword = Math.random().toString(36).slice(-12) + 'A1!'
-    
+
 
     const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -194,7 +194,7 @@ export async function inviteOrganizationMember(formData: FormData) {
     }
 
     console.log('[STAFF] New user created:', newUser.user.id)
-    
+
     // Add invitation record to invitations table
     const { error: inviteError } = await supabase
       .from('invitations')
@@ -306,9 +306,21 @@ export async function resendInvitation(invitationId: string, organizationId: str
       invited_by: user.id
     }
   })
-  
+
   if (createUserError) {
     console.log('[STAFF] Create user error (may be existing):', createUserError.message)
+
+    // The user already exists in auth.users, so we should actually resend the signup email
+    const { error: resendError } = await supabaseAdmin.auth.resend({
+      type: 'signup',
+      email: invitation.email,
+    })
+
+    if (resendError) {
+      console.log('[STAFF] Failed to trigger resend via Supabase Auth:', resendError.message)
+    } else {
+      console.log('[STAFF] Successfully triggered Supabase Auth resend email')
+    }
   } else {
     console.log('[STAFF] Created user and sent email:', newUser?.user?.id)
   }
