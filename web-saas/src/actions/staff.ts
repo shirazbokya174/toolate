@@ -307,10 +307,15 @@ export async function resendInvitation(invitationId: string, organizationId: str
   if (createUserError) {
     console.log('[STAFF] Invite user error (may be existing):', createUserError.message)
 
-    // The user already exists in auth.users, so we should actually resend the invite email
-    const { error: resendError } = await supabaseAdmin.auth.resend({
-      type: 'invite',
-      email: invitation.email,
+    // The user already exists in auth.users.
+    // However, if they exist and haven't set a password yet, calling inviteUserByEmail 
+    // actually *does* resend the invite email safely in Supabase. So we don't need a fallback.
+    const { error: resendError } = await supabaseAdmin.auth.admin.inviteUserByEmail(invitation.email, {
+      data: {
+        organization_id: organizationId,
+        role: invitation.role,
+        invited_by: user.id
+      }
     })
 
     if (resendError) {
