@@ -275,6 +275,8 @@ export async function updateOrganizationMemberRole(
 // Resend invitation email - simple delete and recreate
 export async function resendInvitation(invitationId: string, organizationId: string) {
   const supabase = await createClient()
+  const supabaseAdmin = createAdminClient()
+  const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'https://toolate.vercel.app'
   const { data: { user }, error: authError } = await supabase.auth.getUser()
 
   if (authError || !user) {
@@ -290,6 +292,25 @@ export async function resendInvitation(invitationId: string, organizationId: str
 
   if (inviteError || !invitation) {
     return { error: 'Invitation not found' }
+  }
+
+  // Try to create user and send confirmation email
+  const tempPassword = Math.random().toString(36).slice(-12) + 'A1!'
+  const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+    email: invitation.email,
+    password: tempPassword,
+    email_confirm: false,
+    user_metadata: {
+      organization_id: organizationId,
+      role: invitation.role,
+      invited_by: user.id
+    }
+  })
+  
+  if (createUserError) {
+    console.log('[STAFF] Create user error (may be existing):', createUserError.message)
+  } else {
+    console.log('[STAFF] Created user and sent email:', newUser?.user?.id)
   }
 
   // Delete old invitation
