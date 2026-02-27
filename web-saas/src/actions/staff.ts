@@ -169,9 +169,28 @@ export async function inviteOrganizationMember(formData: FormData) {
     return { success: true }
   } else {
     // User doesn't exist in auth - create them with temporary password
+
+    // NOTE: We MUST insert the invitation record FIRST.
+    // Why? Because as soon as admin.createUser succeeds, the Postgres trigger `handle_new_user` fires instantly.
+    // If the invitation doesn't exist yet, the trigger won't auto-join them to the organization.
+    const { error: inviteError } = await supabase
+      .from('invitations')
+      .insert({
+        organization_id: organizationId,
+        email: email,
+        role: role,
+        status: 'pending',
+        invited_by: user.id
+      })
+
+    if (inviteError) {
+      console.error('[STAFF] Create invitation error:', inviteError)
+      return { error: inviteError.message }
+    }
+
+    // Now that the invitation exists, create the user.
     // This sends an email for them to set their password
     const tempPassword = Math.random().toString(36).slice(-12) + 'A1!'
-
 
     const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -186,29 +205,16 @@ export async function inviteOrganizationMember(formData: FormData) {
 
     if (createUserError) {
       console.error('[STAFF] Create user error:', createUserError)
+
+      // Cleanup the orphaned invitation since user creation failed
+      await supabase.from('invitations').delete().eq('organization_id', organizationId).eq('email', email).eq('status', 'pending')
+
       return { error: createUserError.message }
     }
 
     if (!newUser?.user) {
+      await supabase.from('invitations').delete().eq('organization_id', organizationId).eq('email', email).eq('status', 'pending')
       return { error: 'Failed to create user' }
-    }
-
-    console.log('[STAFF] New user created:', newUser.user.id)
-
-    // Add invitation record to invitations table
-    const { error: inviteError } = await supabase
-      .from('invitations')
-      .insert({
-        organization_id: organizationId,
-        email: email,
-        role: role,
-        status: 'pending',
-        invited_by: user.id
-      })
-
-    if (inviteError) {
-      console.error('[STAFF] Create invitation error:', inviteError)
-      return { error: inviteError.message }
     }
 
     console.log('[STAFF] SUCCESS - User invited:', email, 'User ID:', newUser.user.id)
