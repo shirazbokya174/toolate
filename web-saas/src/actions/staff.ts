@@ -146,7 +146,7 @@ export async function inviteOrganizationMember(formData: FormData) {
   const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
 
   // Try to find existing user in auth by listing users and filtering
-  const { data: existingAuthUser, error: userCheckError } = await supabaseAdmin.from('auth.users').select('id, email').eq('email', email.toLowerCase()).single()
+  const { data: existingAuthUser, error: userCheckError } = await supabaseAdmin.from('auth.users').select('id, email').ilike('email', email).single()
   
   if (existingAuthUser) {
     // User exists in auth - add directly to organization
@@ -296,7 +296,7 @@ export async function resendInvitation(invitationId: string, organizationId: str
   const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('127.0.0.1', 'localhost') || 'http://localhost:3000'
 
   // Check if user already exists in auth
-  const { data: existingAuthUser, error: userCheckError } = await supabaseAdmin.from('auth.users').select('id, email').eq('email', invitation.email.toLowerCase()).single()
+  const { data: existingAuthUser, error: userCheckError } = await supabaseAdmin.from('auth.users').select('id, email').ilike('email', invitation.email).single()
 
 
   if (existingAuthUser) {
